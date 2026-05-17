@@ -10,6 +10,9 @@ isi perubahannya. Output berupa JSON-lines yang siap diserap oleh
 - Watch banyak path (file atau folder), rekursif opsional
 - Deteksi event: `created`, `modified`, `deleted`, `renamed_from`, `permission_changed`, `dir_created`
 - Catat **pemilik file** (Windows: `DOMAIN\user` via SID, Linux: username via uid)
+- Catat **proses yang sedang membuka file** saat event terjadi (best-effort):
+  - Linux: scan `/proc/*/fd/*`
+  - Windows: Restart Manager API (`rstrtmgr.dll`)
 - **SHA256 sebelum/sesudah** untuk verifikasi perubahan isi
 - **Unified diff** untuk file teks (mirip `diff -u`), dengan deteksi binary otomatis
 - Debounce burst event dari editor & installer
@@ -81,7 +84,7 @@ Satu baris = satu event. Contoh `modified`:
 
 ```json
 {
-  "timestamp": "2026-05-17T12:05:04.744Z",
+  "timestamp": "2026-05-17T12:50:03.522Z",
   "source": "fwatcher",
   "host": "web-01",
   "event_type": "modified",
@@ -93,23 +96,31 @@ Satu baris = satu event. Contoh `modified`:
   "hash_after": "sha256:def456...",
   "diff": "--- before\n+++ after\n@@ -10,3 +10,3 @@\n-    worker_processes 4;\n+    worker_processes 8;\n",
   "diff_truncated": false,
-  "is_binary": false
+  "is_binary": false,
+  "editor_pid": 14236,
+  "editor_user": "ops-deploy",
+  "editor_proc": "ansible-playbook",
+  "editor_exe": "/usr/bin/python3"
 }
 ```
 
-| Field            | Tipe   | Catatan                                                    |
-|------------------|--------|------------------------------------------------------------|
-| `timestamp`      | string | RFC3339 nanosekon, UTC                                     |
-| `source`         | string | Selalu `"fwatcher"` — pakai ini untuk filter di Wazuh      |
-| `host`           | string | Hostname mesin                                             |
-| `event_type`     | string | `created` / `modified` / `deleted` / `renamed_from` / `permission_changed` / `dir_created` / `watcher_error` / `service_started` / `service_stopped` |
-| `path`           | string | Path absolut                                               |
-| `user`           | string | Pemilik file saat event (lihat catatan di bawah)           |
-| `size_before/after` | int | Bytes                                                      |
-| `hash_before/after` | string | `sha256:<hex>` atau `skipped:too_large`                  |
-| `diff`           | string | Unified diff isi (kosong untuk binary / oversize)          |
-| `diff_truncated` | bool   | `true` jika diff dipotong sampai `max_diff_output_kb`      |
-| `is_binary`      | bool   | `true` jika file terdeteksi binary (NUL byte di 8 KB awal) |
+| Field               | Tipe   | Catatan                                                    |
+|---------------------|--------|------------------------------------------------------------|
+| `timestamp`         | string | RFC3339 nanosekon, UTC                                     |
+| `source`            | string | Selalu `"fwatcher"` — pakai ini untuk filter di Wazuh      |
+| `host`              | string | Hostname mesin                                             |
+| `event_type`        | string | `created` / `modified` / `deleted` / `renamed_from` / `permission_changed` / `dir_created` / `watcher_error` / `service_started` / `service_stopped` |
+| `path`              | string | Path absolut                                               |
+| `user`              | string | **Pemilik** file saat event                                |
+| `size_before/after` | int    | Bytes                                                      |
+| `hash_before/after` | string | `sha256:<hex>` atau `skipped:too_large`                    |
+| `diff`              | string | Unified diff isi (kosong untuk binary / oversize)          |
+| `diff_truncated`    | bool   | `true` jika diff dipotong sampai `max_diff_output_kb`      |
+| `is_binary`         | bool   | `true` jika file terdeteksi binary (NUL byte di 8 KB awal) |
+| `editor_pid`        | int    | PID proses yang sedang membuka file saat event (best-effort) |
+| `editor_user`       | string | User dari proses tsb (Linux: username, Windows: `DOMAIN\user`) |
+| `editor_proc`       | string | Nama proses / image (`/proc/PID/comm` atau `RM_PROCESS_INFO.strAppName`) |
+| `editor_exe`        | string | Path lengkap executable saat tersedia                      |
 
 ## Integrasi Wazuh
 
@@ -165,15 +176,45 @@ sudo sysctl -p
 
 ## Catatan: "siapa yang edit"
 
-Field `user` di event berisi **pemilik file** (file owner SID di Windows, uid di Linux),
-**bukan** orang yang sebenarnya mengetik perubahan. fsnotify / inotify tidak menyediakan
-identitas penulis. Untuk audit yang akurat:
+Ada dua field yang menjawab pertanyaan ini, dengan reliabilitas berbeda:
 
-- **Linux:** aktifkan `auditd` dengan rule pada path yang sama → Wazuh mengkorelasikan via field `path`.
-- **Windows:** aktifkan audit policy untuk object access (Event 4663) → Wazuh agent membaca event log.
+### `user` — pemilik file (selalu ada)
 
-fwatcher tetap berguna sebagai **layer kedua** karena memberi hash + diff yang tidak
-disediakan auditd / Event Log.
+File owner SID di Windows, uid di Linux. **Bukan** orang yang mengetik perubahan,
+melainkan pemilik permanen file. Selalu tersedia.
+
+### `editor_*` — proses yang sedang membuka file (best-effort)
+
+Saat event terjadi, fwatcher scan proses-proses yang sedang memegang handle ke file
+tersebut:
+
+- **Linux:** baca `/proc/*/fd/*`. Tanpa root cuma lihat proses milik sendiri; jalankan
+  via systemd (`User=root`) untuk visibility penuh.
+- **Windows:** Restart Manager API. Tidak butuh admin.
+
+**Kapan ini berhasil:**
+- Editor menahan file selama proses edit (`vim` mode-w-O_TRUNC sebentar, `nano` saat save,
+  `notepad`, IDE yang menahan handle, deployment script yang tulis-perlahan)
+
+**Kapan ini gagal (field kosong):**
+- Atomic-write (VSCode, modern vim, `cp`, package installer) — tulis ke tmp lalu rename,
+  saat scan dilakukan tmp sudah ditutup
+- Write super cepat (millidetik) yang selesai sebelum debounce + scan
+- Edit dari proses milik user lain saat fwatcher tidak running sebagai root
+
+**Untuk audit kuat (100% reliable identitas penulis):**
+
+- **Linux:** aktifkan `auditd` dengan rule pada path yang sama, misal:
+  ```bash
+  sudo auditctl -w /etc/passwd -p wa -k fim
+  ```
+  Wazuh ingest `/var/log/audit/audit.log` otomatis dan korelasikan via field `path`.
+- **Windows:** aktifkan Audit Policy (Group Policy → Local Policies → Audit Policy →
+  Audit object access) + SACL di file. Event 4663 muncul di Security log dan Wazuh
+  agent membacanya.
+
+fwatcher tetap berguna sebagai **layer kedua** — auditd / Event 4663 memberi identitas
+tapi tidak memberi **isi perubahan**. fwatcher melengkapi dengan hash + diff.
 
 ## Lisensi
 

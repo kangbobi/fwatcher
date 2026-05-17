@@ -18,6 +18,7 @@ type Config struct {
 	MaxDiffSizeKB    int64    `yaml:"max_diff_size_kb"`    // 0 disables content diffing
 	DiffContextLines int      `yaml:"diff_context_lines"`  // unified diff context
 	MaxDiffOutputKB  int      `yaml:"max_diff_output_kb"`  // cap diff field in JSON log
+	DetectEditor     *bool    `yaml:"detect_editor"`       // nil → default true
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -48,5 +49,9 @@ func LoadConfig(path string) (*Config, error) {
 		c.MaxDiffOutputKB = 16
 	}
 	// MaxDiffSizeKB default is 0 (disabled) — user must opt in by setting it.
+	if c.DetectEditor == nil {
+		t := true
+		c.DetectEditor = &t
+	}
 	return &c, nil
 }

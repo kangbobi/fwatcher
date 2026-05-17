@@ -25,6 +25,7 @@ type Watcher struct {
 	mu         sync.Mutex
 	state      map[string]fileState
 	debounce   map[string]*time.Timer
+	editors    map[string]ProcessInfo // latest candidate per path, cleared in process()
 	maxHash    int64
 	maxContent int64
 	maxDiffOut int
@@ -41,6 +42,7 @@ func NewWatcher(cfg *Config, lg *Logger) (*Watcher, error) {
 		fs:         fs,
 		state:      map[string]fileState{},
 		debounce:   map[string]*time.Timer{},
+		editors:    map[string]ProcessInfo{},
 		maxHash:    cfg.MaxHashSizeMB * 1024 * 1024,
 		maxContent: cfg.MaxDiffSizeKB * 1024,
 		maxDiffOut: cfg.MaxDiffOutputKB * 1024,
@@ -129,6 +131,17 @@ func (w *Watcher) Run(ctx context.Context) error {
 			}
 			name := ev.Name
 			op := ev.Op
+
+			// Scan IMMEDIATELY — by the time the debounce fires the editor
+			// may have closed the file. Last writer wins across the burst.
+			if w.cfg.DetectEditor != nil && *w.cfg.DetectEditor {
+				if procs := ProcessesHoldingFile(name); len(procs) > 0 {
+					w.mu.Lock()
+					w.editors[name] = procs[0]
+					w.mu.Unlock()
+				}
+			}
+
 			w.mu.Lock()
 			if t, ok := w.debounce[name]; ok {
 				t.Stop()
@@ -150,7 +163,11 @@ func (w *Watcher) process(name string, op fsnotify.Op) {
 	w.mu.Lock()
 	prev, hadPrev := w.state[name]
 	delete(w.debounce, name)
+	editor, hasEditor := w.editors[name]
 	w.mu.Unlock()
+	// editors[name] is cleared only after we successfully emit an event for
+	// this path — otherwise a locked-file snapshot would lose the editor info
+	// before the next debounce cycle.
 
 	switch {
 	// Many editors (and our own Write tool) do atomic-replace: write a tmp file
@@ -168,11 +185,22 @@ func (w *Watcher) process(name string, op fsnotify.Op) {
 				}
 				user, _ := FileOwner(name)
 				w.log.Log(Event{EventType: "dir_created", Path: name, User: user})
+				w.mu.Lock()
+				delete(w.editors, name)
+				w.mu.Unlock()
 			}
 			return
 		}
-		snap, _ := w.snapshot(name)
+		snap, err := w.snapshot(name)
+		if err != nil {
+			// File likely locked by the editor — leave state & editor cache
+			// intact so the next event (after editor closes) can attribute it.
+			return
+		}
 		if hadPrev && snap.Hash == prev.hash && snap.Size == prev.size {
+			w.mu.Lock()
+			delete(w.editors, name)
+			w.mu.Unlock()
 			return // no-op
 		}
 		user, _ := FileOwner(name)
@@ -203,31 +231,61 @@ func (w *Watcher) process(name string, op fsnotify.Op) {
 			evt.HashBefore = prev.hash
 			evt.SizeBefore = prev.size
 		}
+		if hasEditor {
+			attachEditor(&evt, editor)
+		}
 		w.log.Log(evt)
+		w.mu.Lock()
+		delete(w.editors, name)
+		w.mu.Unlock()
 
 	case op&fsnotify.Remove != 0:
 		w.mu.Lock()
 		delete(w.state, name)
+		delete(w.editors, name)
 		w.mu.Unlock()
-		w.log.Log(Event{
+		evt := Event{
 			EventType: "deleted", Path: name,
 			HashBefore: prev.hash, SizeBefore: prev.size,
 			IsBinary: prev.binary,
-		})
+		}
+		if hasEditor {
+			attachEditor(&evt, editor)
+		}
+		w.log.Log(evt)
 
 	case op&fsnotify.Rename != 0:
 		w.mu.Lock()
 		delete(w.state, name)
+		delete(w.editors, name)
 		w.mu.Unlock()
-		w.log.Log(Event{
+		evt := Event{
 			EventType: "renamed_from", Path: name,
 			HashBefore: prev.hash, SizeBefore: prev.size,
-		})
+		}
+		if hasEditor {
+			attachEditor(&evt, editor)
+		}
+		w.log.Log(evt)
 
 	case op&fsnotify.Chmod != 0:
 		user, _ := FileOwner(name)
-		w.log.Log(Event{EventType: "permission_changed", Path: name, User: user})
+		evt := Event{EventType: "permission_changed", Path: name, User: user}
+		if hasEditor {
+			attachEditor(&evt, editor)
+		}
+		w.log.Log(evt)
+		w.mu.Lock()
+		delete(w.editors, name)
+		w.mu.Unlock()
 	}
+}
+
+func attachEditor(e *Event, p ProcessInfo) {
+	e.EditorPID = p.PID
+	e.EditorUser = p.User
+	e.EditorProc = p.Name
+	e.EditorExe = p.Exe
 }
 
 func (w *Watcher) Close() error {

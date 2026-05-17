@@ -34,6 +34,14 @@ diff_context_lines: 3
 # membatasi ~64KB per event line — jangan diset terlalu besar.
 max_diff_output_kb: 16
 
+# Coba deteksi PROSES yang sedang membuka file saat event terjadi.
+# Linux : scan /proc/*/fd/* (tanpa root: cuma lihat proses milik sendiri)
+# Windows: Restart Manager API (no admin needed)
+# Best-effort — atomic-write & short writes sering keburu tutup file
+# sebelum kita sempat scan. Untuk audit kuat, pakai auditd (Linux) atau
+# Windows Audit / Sysmon (lihat README).
+detect_editor: true
+
 # Pola yang diabaikan: glob (filepath.Match) untuk basename, atau substring path
 ignore_patterns:
   - "*.tmp"

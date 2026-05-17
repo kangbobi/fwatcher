@@ -37,6 +37,12 @@ diff_context_lines: 3
 # Batas ukuran field "diff" di JSON log (KB)
 max_diff_output_kb: 16
 
+# Coba deteksi PROSES yang sedang membuka file saat event terjadi.
+# Linux: scan /proc/*/fd/*. Tanpa root cuma lihat proses sendiri —
+# jalankan via systemd (User=root) untuk lihat semua editor.
+# Best-effort; atomic-write & short writes sering keburu tutup file.
+detect_editor: true
+
 # Pola yang diabaikan
 ignore_patterns:
   - "*.tmp"
