@@ -1,0 +1,14 @@
+<!--
+  Untuk Wazuh AGENT di Linux.
+  Tambahkan blok di dalam <ossec_config> pada:
+    /var/ossec/etc/ossec.conf
+
+  Lalu restart agent:
+    sudo systemctl restart wazuh-agent
+-->
+
+<localfile>
+  <location>/var/log/fwatcher/fwatcher.json</location>
+  <log_format>json</log_format>
+  <label key="@source">fwatcher</label>
+</localfile>

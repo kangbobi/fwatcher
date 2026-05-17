@@ -1,0 +1,50 @@
+# fwatcher configuration - Linux
+# ----------------------------------------------------------------------
+# Path absolute yang dipantau. Bisa file atau folder.
+paths:
+  - "/etc"
+  - "/var/www"
+  - "/home"
+
+# Pantau seluruh subfolder secara rekursif
+# CATATAN: tiap subfolder = 1 inotify watch. Kalau target besar (banyak subfolder),
+# naikkan limit kernel:
+#   echo fs.inotify.max_user_watches=524288 | sudo tee -a /etc/sysctl.conf
+#   sudo sysctl -p
+recursive: true
+
+# File log JSON yang dibaca Wazuh agent via <localfile>
+log_path: "/var/log/fwatcher/fwatcher.json"
+
+# Hash SHA256 sebelum/sesudah perubahan
+hash_files: true
+
+# Skip hash file lebih besar dari ini (MB)
+max_hash_size_mb: 100
+
+# Debounce event burst dari editor/installer dalam milidetik
+debounce_ms: 300
+
+# Tampilkan ISI perubahan (unified diff) di log.
+# Set 0 untuk matikan — hanya hash yang dicatat.
+# File teks ≤ angka KB ini akan disimpan content-nya untuk diff.
+# CATATAN: tiap file watched yang ≤ batas ini menempati RAM seukuran filenya.
+max_diff_size_kb: 512
+
+# Jumlah baris konteks di unified diff
+diff_context_lines: 3
+
+# Batas ukuran field "diff" di JSON log (KB)
+max_diff_output_kb: 16
+
+# Pola yang diabaikan
+ignore_patterns:
+  - "*.tmp"
+  - "*.tmp.*"   # atomic-write tempfiles
+  - "*.swp"
+  - "*.swx"
+  - "*~"
+  - ".git"
+  - "node_modules"
+  - "__pycache__"
+  - "*.pyc"

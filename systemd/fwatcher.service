@@ -1,0 +1,37 @@
+[Unit]
+Description=fwatcher - file integrity monitor (JSON log for Wazuh)
+After=network.target
+Documentation=https://github.com/fsnotify/fsnotify
+
+[Service]
+Type=simple
+# Jalankan sebagai root supaya bisa baca metadata semua file (owner via stat).
+# Kalau path yang dimonitor terbatas dan ownerless tidak masalah, ganti ke user lain.
+User=root
+Group=root
+
+ExecStart=/usr/local/bin/fwatcher -config /etc/fwatcher/config.yaml
+WorkingDirectory=/var/lib/fwatcher
+
+Restart=on-failure
+RestartSec=5s
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Hardening — longgar supaya bisa baca filesystem luas; ketatkan kalau scope sempit
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/log/fwatcher /var/lib/fwatcher
+ProtectHome=read-only
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+# Log stdout/stderr ke journal (terpisah dari JSON log)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fwatcher
+
+[Install]
+WantedBy=multi-user.target

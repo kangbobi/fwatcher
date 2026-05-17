@@ -1,0 +1,60 @@
+<!--
+  Letakkan di Wazuh MANAGER:
+    /var/ossec/etc/rules/local_rules.xml
+
+  Lalu restart manager:
+    systemctl restart wazuh-manager
+
+  Catatan: rule ID 100200+ dipakai sebagai contoh. Sesuaikan supaya
+  tidak bentrok dengan rule lokal lain (range custom 100000-119999).
+-->
+
+<group name="fwatcher,syscheck,">
+
+  <!-- Parent rule: cocokkan semua event fwatcher -->
+  <rule id="100200" level="3">
+    <decoded_as>json</decoded_as>
+    <field name="source">fwatcher</field>
+    <description>fwatcher: $(event_type) on $(path)</description>
+    <group>fim,</group>
+  </rule>
+
+  <!-- File modified -->
+  <rule id="100201" level="5">
+    <if_sid>100200</if_sid>
+    <field name="event_type">modified</field>
+    <description>fwatcher: file modified - $(path) by $(user)</description>
+    <group>fim_modified,</group>
+  </rule>
+
+  <!-- File deleted -->
+  <rule id="100202" level="7">
+    <if_sid>100200</if_sid>
+    <field name="event_type">deleted</field>
+    <description>fwatcher: file deleted - $(path)</description>
+    <group>fim_deleted,</group>
+  </rule>
+
+  <!-- File created -->
+  <rule id="100203" level="4">
+    <if_sid>100200</if_sid>
+    <field name="event_type">created</field>
+    <description>fwatcher: file created - $(path) by $(user)</description>
+    <group>fim_added,</group>
+  </rule>
+
+  <!-- Permission changed -->
+  <rule id="100204" level="6">
+    <if_sid>100200</if_sid>
+    <field name="event_type">permission_changed</field>
+    <description>fwatcher: permission changed - $(path) by $(user)</description>
+  </rule>
+
+  <!-- Watcher itself reporting error -->
+  <rule id="100205" level="8">
+    <if_sid>100200</if_sid>
+    <field name="event_type">watcher_error</field>
+    <description>fwatcher: internal error - $(error)</description>
+  </rule>
+
+</group>

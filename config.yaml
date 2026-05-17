@@ -1,0 +1,46 @@
+# fwatcher configuration
+# ----------------------------------------------------------------------
+# Path absolute yang dipantau. Bisa file atau folder.
+# Pakai forward slash ATAU double backslash di Windows.
+paths:
+  - "J:/project/fwatcher/testdir"
+
+# Pantau seluruh subfolder secara rekursif (untuk path yang berupa folder)
+recursive: true
+
+# Lokasi file log JSON. Wazuh agent membaca file ini via <localfile>.
+# Folder akan dibuat otomatis kalau belum ada.
+log_path: "J:/project/fwatcher/logs/fwatcher.json"
+
+# Hitung SHA256 sebelum/sesudah perubahan supaya bisa verifikasi isi berubah
+hash_files: true
+
+# Skip hashing file lebih besar dari ini (MB) — supaya tidak berat saat copy file besar
+max_hash_size_mb: 100
+
+# Debounce event burst dari editor/installer dalam milidetik
+debounce_ms: 300
+
+# Tampilkan ISI perubahan (unified diff) di log.
+# Set 0 untuk matikan — hanya hash yang dicatat.
+# File teks ≤ angka KB ini akan disimpan content-nya untuk diff.
+# CATATAN: tiap file watched yang ≤ batas ini menempati RAM seukuran filenya.
+max_diff_size_kb: 512
+
+# Jumlah baris konteks di unified diff (mirip `diff -U N`)
+diff_context_lines: 3
+
+# Batas ukuran field "diff" di JSON log (KB). Wazuh biasanya
+# membatasi ~64KB per event line — jangan diset terlalu besar.
+max_diff_output_kb: 16
+
+# Pola yang diabaikan: glob (filepath.Match) untuk basename, atau substring path
+ignore_patterns:
+  - "*.tmp"
+  - "*.tmp.*"   # atomic-write tempfiles (VSCode, editor save patterns)
+  - "*.swp"
+  - "*.swx"
+  - "*.bak"
+  - "~$*"
+  - ".git"
+  - "node_modules"

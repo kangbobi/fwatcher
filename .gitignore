@@ -1,0 +1,43 @@
+# Build artifacts
+fwatcher
+fwatcher.exe
+fwatcher-linux-amd64
+fwatcher-linux-arm64
+fwatcher-darwin-amd64
+fwatcher-darwin-arm64
+*.exe
+*.test
+*.out
+
+# Runtime / local data
+logs/
+testdir/
+*.log
+*.json.log
+stdout.txt
+stderr.txt
+
+# Local-only configs (keep examples in repo, ignore real ones)
+config.local.yaml
+config.prod.yaml
+
+# Go
+vendor/
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swx
+*~
+.history/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,18 @@
+<!--
+  Tambahkan blok berikut ke dalam <ossec_config> pada ossec.conf di Wazuh AGENT:
+
+  Windows (default install):
+    C:\Program Files (x86)\ossec-agent\ossec.conf
+  Linux:
+    /var/ossec/etc/ossec.conf
+
+  Setelah edit, restart service Wazuh agent:
+    Windows: Restart-Service WazuhSvc
+    Linux:   systemctl restart wazuh-agent
+-->
+
+<localfile>
+  <location>J:\project\fwatcher\logs\fwatcher.json</location>
+  <log_format>json</log_format>
+  <label key="@source">fwatcher</label>
+</localfile>
