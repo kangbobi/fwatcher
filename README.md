@@ -197,6 +197,15 @@ fallback ke fsnotify di tempat lain.
 
 fanotify(7) adalah API kernel khusus untuk FIM. Setiap event `FAN_CLOSE_WRITE`
 membawa PID pelaku di header event-nya — bukan polling, bukan tebakan.
+Di kernel **5.15+** fwatcher juga meminta `FAN_REPORT_PIDFD`: setiap event
+disertai *pidfd* yang **mengunci slot PID** sehingga proses pelaku tidak bisa
+digantikan saat kita masih membaca metadata-nya (menghilangkan race
+PID-reuse). Pada saat boot fwatcher print backend mana yang aktif, contoh:
+
+```
+fwatcher started: backend=fanotify (FAN_REPORT_PIDFD), 3 path(s), ...
+```
+
 fwatcher lalu baca `/proc/PID/{status, loginuid, comm, exe}` untuk dapat:
 
 - `editor_user` — user efektif (uid saat menulis)

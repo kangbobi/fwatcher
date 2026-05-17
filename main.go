@@ -36,6 +36,14 @@ func main() {
 	}
 	defer backend.Close()
 
+	if pf, ok := backend.(interface{ HasPidfd() bool }); ok {
+		if pf.HasPidfd() {
+			name += " (FAN_REPORT_PIDFD)"
+		} else {
+			name += " (no pidfd; kernel<5.15 — PID-reuse race possible)"
+		}
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
