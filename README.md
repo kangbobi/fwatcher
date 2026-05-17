@@ -10,9 +10,13 @@ isi perubahannya. Output berupa JSON-lines yang siap diserap oleh
 - Watch banyak path (file atau folder), rekursif opsional
 - Deteksi event: `created`, `modified`, `deleted`, `renamed_from`, `permission_changed`, `dir_created`
 - Catat **pemilik file** (Windows: `DOMAIN\user` via SID, Linux: username via uid)
-- Catat **proses yang sedang membuka file** saat event terjadi (best-effort):
-  - Linux: scan `/proc/*/fd/*`
-  - Windows: Restart Manager API (`rstrtmgr.dll`)
+- Catat **proses yang mengedit file** saat event terjadi:
+  - **Linux + root:** backend **fanotify** — kernel mengirim PID pelaku
+    langsung bersama event (sama sumber data dengan auditd, 100% akurat)
+  - **Linux non-root:** scan `/proc/*/fd/*` (best-effort, race-prone)
+  - **Windows:** Restart Manager API (`rstrtmgr.dll`, no admin needed)
+- Catat `editor_login_user` di Linux — **AUID** dari `/proc/PID/loginuid`,
+  yaitu user yang aslinya login (tetap akurat walau pelaku pakai `sudo`)
 - **SHA256 sebelum/sesudah** untuk verifikasi perubahan isi
 - **Unified diff** untuk file teks (mirip `diff -u`), dengan deteksi binary otomatis
 - Debounce burst event dari editor & installer
@@ -117,10 +121,11 @@ Satu baris = satu event. Contoh `modified`:
 | `diff`              | string | Unified diff isi (kosong untuk binary / oversize)          |
 | `diff_truncated`    | bool   | `true` jika diff dipotong sampai `max_diff_output_kb`      |
 | `is_binary`         | bool   | `true` jika file terdeteksi binary (NUL byte di 8 KB awal) |
-| `editor_pid`        | int    | PID proses yang sedang membuka file saat event (best-effort) |
-| `editor_user`       | string | User dari proses tsb (Linux: username, Windows: `DOMAIN\user`) |
-| `editor_proc`       | string | Nama proses / image (`/proc/PID/comm` atau `RM_PROCESS_INFO.strAppName`) |
-| `editor_exe`        | string | Path lengkap executable saat tersedia                      |
+| `editor_pid`        | int    | PID pelaku. fanotify: dari kernel. fsnotify: dari /proc scan / Restart Manager |
+| `editor_user`       | string | User efektif (Linux: username, Windows: `DOMAIN\user`)     |
+| `editor_login_user` | string | Linux only — AUID dari `/proc/PID/loginuid`. Survives `sudo` (mis. `alice` saat `sudo -u root nano ...`) |
+| `editor_proc`       | string | Nama proses / image                                        |
+| `editor_exe`        | string | Path lengkap executable                                    |
 
 ## Integrasi Wazuh
 
@@ -176,45 +181,65 @@ sudo sysctl -p
 
 ## Catatan: "siapa yang edit"
 
-Ada dua field yang menjawab pertanyaan ini, dengan reliabilitas berbeda:
+fwatcher punya dua jalur deteksi pelaku, dengan reliabilitas berbeda.
 
-### `user` — pemilik file (selalu ada)
+### Backend (`backend:` di config)
 
-File owner SID di Windows, uid di Linux. **Bukan** orang yang mengetik perubahan,
-melainkan pemilik permanen file. Selalu tersedia.
+| Backend | OS | Privilege | Sumber identitas | Reliabilitas |
+|---|---|---|---|---|
+| **fanotify** | Linux 4.20+ | root (`CAP_SYS_ADMIN`) | PID dari kernel, sama sumber data dengan auditd | **100% akurat untuk write events** |
+| **fsnotify** (default non-root) | Linux / Windows / macOS | none | Scan `/proc/*/fd` (Linux) atau Restart Manager (Windows) setelah event | Best-effort, race-prone |
 
-### `editor_*` — proses yang sedang membuka file (best-effort)
+Default `backend: auto` → pakai fanotify saat jalan sebagai root di Linux,
+fallback ke fsnotify di tempat lain.
 
-Saat event terjadi, fwatcher scan proses-proses yang sedang memegang handle ke file
-tersebut:
+### Mode fanotify (jalankan sebagai root)
 
-- **Linux:** baca `/proc/*/fd/*`. Tanpa root cuma lihat proses milik sendiri; jalankan
-  via systemd (`User=root`) untuk visibility penuh.
-- **Windows:** Restart Manager API. Tidak butuh admin.
+fanotify(7) adalah API kernel khusus untuk FIM. Setiap event `FAN_CLOSE_WRITE`
+membawa PID pelaku di header event-nya — bukan polling, bukan tebakan.
+fwatcher lalu baca `/proc/PID/{status, loginuid, comm, exe}` untuk dapat:
 
-**Kapan ini berhasil:**
-- Editor menahan file selama proses edit (`vim` mode-w-O_TRUNC sebentar, `nano` saat save,
-  `notepad`, IDE yang menahan handle, deployment script yang tulis-perlahan)
+- `editor_user` — user efektif (uid saat menulis)
+- `editor_login_user` — **AUID** (loginuid). Survives `sudo`, `su`, dst.
+  Misal user `alice` login lalu `sudo nano /etc/passwd`: `editor_user=root`
+  tapi `editor_login_user=alice`.
+- `editor_proc`, `editor_exe`
 
-**Kapan ini gagal (field kosong):**
-- Atomic-write (VSCode, modern vim, `cp`, package installer) — tulis ke tmp lalu rename,
-  saat scan dilakukan tmp sudah ditutup
-- Write super cepat (millidetik) yang selesai sebelum debounce + scan
-- Edit dari proses milik user lain saat fwatcher tidak running sebagai root
+**Setup:**
+```yaml
+# config.yaml
+backend: auto       # atau "fanotify" untuk paksa
+```
+Pastikan systemd unit menjalankan sebagai root (`User=root` di
+`fwatcher.service`, sudah default).
 
-**Untuk audit kuat (100% reliable identitas penulis):**
+**Catatan fanotify mode:**
 
-- **Linux:** aktifkan `auditd` dengan rule pada path yang sama, misal:
+- Subscribed mask = `FAN_CLOSE_WRITE` saja. Setiap proses yang membuka file
+  untuk write **dan menutupnya** akan ditangkap — termasuk atomic-write
+  (close pada tmp file, lalu rename).
+- Basic (non-FID) mode **tidak mengirim event delete murni**. Kalau audit
+  hapus penting, jalankan auditd di sebelahnya.
+- Mark pakai `FAN_MARK_FILESYSTEM` (fallback `FAN_MARK_MOUNT`) — events
+  untuk seluruh filesystem akan masuk lalu di-filter di userspace.
+
+### Mode fsnotify (non-root atau Windows)
+
+Scan `/proc/*/fd/*` (Linux) atau Restart Manager API (Windows) tepat saat
+event tiba. Berhasil untuk editor yang menahan file (vim/nano/notepad/IDE),
+sering gagal untuk atomic-write (VSCode, package installer, `cp`) karena
+file sudah ditutup sebelum sempat di-scan.
+
+### Lapis tambahan untuk audit kuat
+
+- **Linux**: tetap pasang `auditd` di samping fwatcher (mereka saling
+  melengkapi — auditd memberi syscall + arg, fwatcher memberi hash + diff
+  isi). Wazuh otomatis korelasikan via field `path`.
   ```bash
   sudo auditctl -w /etc/passwd -p wa -k fim
   ```
-  Wazuh ingest `/var/log/audit/audit.log` otomatis dan korelasikan via field `path`.
-- **Windows:** aktifkan Audit Policy (Group Policy → Local Policies → Audit Policy →
-  Audit object access) + SACL di file. Event 4663 muncul di Security log dan Wazuh
-  agent membacanya.
-
-fwatcher tetap berguna sebagai **layer kedua** — auditd / Event 4663 memberi identitas
-tapi tidak memberi **isi perubahan**. fwatcher melengkapi dengan hash + diff.
+- **Windows**: aktifkan Group Policy → Audit Policy → Audit object access,
+  dan pasang SACL. Event 4663 di Security log diambil oleh Wazuh agent.
 
 ## Lisensi
 

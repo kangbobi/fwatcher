@@ -9,6 +9,12 @@ import (
 	"syscall"
 )
 
+// Backend is anything that watches the filesystem and produces Events.
+type Backend interface {
+	Run(ctx context.Context) error
+	Close() error
+}
+
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to config file")
 	flag.Parse()
@@ -24,23 +30,45 @@ func main() {
 	}
 	defer lg.Close()
 
-	w, err := NewWatcher(cfg, lg)
+	backend, name, err := selectBackend(cfg, lg)
 	if err != nil {
-		log.Fatalf("init watcher: %v", err)
+		log.Fatalf("init backend: %v", err)
 	}
-	defer w.Close()
+	defer backend.Close()
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	lg.Log(Event{EventType: "service_started", Path: cfg.LogPath})
-	log.Printf("fwatcher started: %d path(s), recursive=%v, log=%s",
-		len(cfg.Paths), cfg.Recursive, cfg.LogPath)
+	log.Printf("fwatcher started: backend=%s, %d path(s), recursive=%v, log=%s",
+		name, len(cfg.Paths), cfg.Recursive, cfg.LogPath)
 
-	if err := w.Run(ctx); err != nil {
-		log.Fatalf("watcher: %v", err)
+	if err := backend.Run(ctx); err != nil {
+		log.Fatalf("backend: %v", err)
 	}
 
 	lg.Log(Event{EventType: "service_stopped"})
 	log.Println("fwatcher stopped")
+}
+
+// selectBackend picks fanotify when explicitly requested or when running as
+// root on Linux. Falls back to fsnotify everywhere else.
+func selectBackend(cfg *Config, lg *Logger) (Backend, string, error) {
+	if cfg.Backend != "fsnotify" {
+		be, err := tryFanotify(cfg, lg)
+		if be != nil {
+			return be, "fanotify", nil
+		}
+		if err != nil && cfg.Backend == "fanotify" {
+			return nil, "", err // user explicitly asked for it
+		}
+		if err != nil {
+			log.Printf("fanotify unavailable: %v; falling back to fsnotify", err)
+		}
+	}
+	w, err := NewWatcher(cfg, lg)
+	if err != nil {
+		return nil, "", err
+	}
+	return w, "fsnotify", nil
 }

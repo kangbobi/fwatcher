@@ -19,6 +19,7 @@ type Config struct {
 	DiffContextLines int      `yaml:"diff_context_lines"`  // unified diff context
 	MaxDiffOutputKB  int      `yaml:"max_diff_output_kb"`  // cap diff field in JSON log
 	DetectEditor     *bool    `yaml:"detect_editor"`       // nil → default true
+	Backend          string   `yaml:"backend"`             // auto | fsnotify | fanotify
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -52,6 +53,9 @@ func LoadConfig(path string) (*Config, error) {
 	if c.DetectEditor == nil {
 		t := true
 		c.DetectEditor = &t
+	}
+	if c.Backend == "" {
+		c.Backend = "auto"
 	}
 	return &c, nil
 }

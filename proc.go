@@ -7,8 +7,9 @@ package main
 // editors that work on a tempfile and rename. When that happens an empty
 // slice is returned and the watcher falls back to the file-owner field.
 type ProcessInfo struct {
-	PID  int
-	User string // username (Linux) or DOMAIN\user (Windows)
-	Name string // short process name / Win32 image name
-	Exe  string // full path to the executable, when resolvable
+	PID       int
+	User      string // username (Linux) or DOMAIN\user (Windows)
+	LoginUser string // Linux only: /proc/PID/loginuid (AUID) — original logged-in user, survives sudo
+	Name      string // short process name / Win32 image name
+	Exe       string // full path to the executable, when resolvable
 }

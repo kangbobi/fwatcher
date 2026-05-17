@@ -22,10 +22,11 @@ type Event struct {
 	Diff          string `json:"diff,omitempty"`
 	DiffTruncated bool   `json:"diff_truncated,omitempty"`
 	IsBinary      bool   `json:"is_binary,omitempty"`
-	EditorPID     int    `json:"editor_pid,omitempty"`
-	EditorUser    string `json:"editor_user,omitempty"`
-	EditorProc    string `json:"editor_proc,omitempty"`
-	EditorExe     string `json:"editor_exe,omitempty"`
+	EditorPID       int    `json:"editor_pid,omitempty"`
+	EditorUser      string `json:"editor_user,omitempty"`
+	EditorLoginUser string `json:"editor_login_user,omitempty"`
+	EditorProc      string `json:"editor_proc,omitempty"`
+	EditorExe       string `json:"editor_exe,omitempty"`
 	Error         string `json:"error,omitempty"`
 }
 

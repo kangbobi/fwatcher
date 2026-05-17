@@ -284,6 +284,7 @@ func (w *Watcher) process(name string, op fsnotify.Op) {
 func attachEditor(e *Event, p ProcessInfo) {
 	e.EditorPID = p.PID
 	e.EditorUser = p.User
+	e.EditorLoginUser = p.LoginUser
 	e.EditorProc = p.Name
 	e.EditorExe = p.Exe
 }

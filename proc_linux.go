@@ -89,5 +89,18 @@ func loadProcInfo(pid int) ProcessInfo {
 			break
 		}
 	}
+	// /proc/PID/loginuid = AUID. -1 (4294967295) means "not set" (kernel boot,
+	// daemons that never logged in). When set, this is the original login user
+	// — survives su/sudo, which is the field auditd reports as `auid`.
+	if b, err := os.ReadFile(fmt.Sprintf("/proc/%d/loginuid", pid)); err == nil {
+		s := strings.TrimSpace(string(b))
+		if s != "" && s != "4294967295" {
+			if u, err := user.LookupId(s); err == nil {
+				info.LoginUser = u.Username
+			} else {
+				info.LoginUser = s
+			}
+		}
+	}
 	return info
 }

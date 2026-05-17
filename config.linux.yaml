@@ -43,6 +43,18 @@ max_diff_output_kb: 16
 # Best-effort; atomic-write & short writes sering keburu tutup file.
 detect_editor: true
 
+# Pilihan backend FS watcher:
+#   auto     → pakai fanotify kalau jalan sebagai root, kalau bukan pakai fsnotify
+#   fanotify → paksa fanotify (Linux only, butuh CAP_SYS_ADMIN/root)
+#   fsnotify → paksa fsnotify (inotify; tidak butuh root)
+#
+# fanotify = kernel kirim PID pelaku LANGSUNG saat event (sama sumber datanya
+# dengan auditd). editor_pid/editor_user/editor_login_user jadi 100% akurat,
+# tidak race seperti scan /proc. Catatan: basic mode fanotify hanya memantau
+# tulis (FAN_CLOSE_WRITE), tidak event delete murni — untuk audit hapus
+# tetap pakai auditd di sebelahnya.
+backend: auto
+
 # Pola yang diabaikan
 ignore_patterns:
   - "*.tmp"
